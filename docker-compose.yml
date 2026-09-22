@@ -1,0 +1,52 @@
+services:
+  api:
+    build:
+      context: ./api
+    image: vacuum-interlock-api:latest
+    environment:
+      # 容器内固定监听 8000；宿主映射端口可通过环境变量配置
+      CORS_ALLOW_ORIGIN: ""
+    ports:
+      # 宿主端口可配置：API_PORT，默认 8000
+      - "${API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/healthz', timeout=2).status==200 else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 3s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./web
+    image: vacuum-interlock-web:latest
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      # 宿主端口可配置：WEB_PORT，默认 8080
+      - "${WEB_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:80/"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 3s
+    restart: unless-stopped
+
+  verify:
+    build:
+      context: .
+      dockerfile: ./verify/Dockerfile
+    image: vacuum-interlock-verify:latest
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    environment:
+      API_BASE_URL: "http://api:8000"
+      WEB_BASE_URL: "http://web:80"
+    # 一次性服务：重放全部检查后退出，退出码即结论（0 成功，非 0 失败）。
+    restart: "no"
