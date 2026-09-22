@@ -1,0 +1,54 @@
+services:
+  api:
+    build:
+      context: ./api
+    environment:
+      API_PORT: "8000"
+    # Host-side published port is configurable via API_PORT (.env / shell).
+    ports:
+      - "${API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=3).status==200 else 1)"]
+      interval: 5s
+      timeout: 4s
+      retries: 12
+      start_period: 3s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./web
+    # Host-side published port is configurable via WEB_PORT (.env / shell).
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost/healthz"]
+      interval: 5s
+      timeout: 4s
+      retries: 12
+      start_period: 3s
+    restart: unless-stopped
+
+  # One-shot verification service: replays cycle completion, equal-optimum
+  # boundary sets, unreachable and invalid requests over REAL HTTP (both
+  # direct-to-api and via the web nginx proxy), runs unit tests and both
+  # builds, then exits. Its exit code is the verdict (0 = all passed).
+  # Kept behind a profile so a plain `docker compose up` only starts app
+  # services; invoke with: docker compose run --rm verify
+  verify:
+    profiles: ["verify"]
+    build:
+      context: .
+      dockerfile: verify/Dockerfile
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    environment:
+      API_BASE: "http://api:8000"
+      WEB_BASE: "http://web"
+    restart: "no"
